@@ -12,7 +12,7 @@ load_dotenv()
 # instantiating the bedrock client, with specific CLI profile
 boto3.setup_default_session(profile_name=os.getenv('profile_name'))
 bedrock = boto3.client('bedrock-runtime', 'us-east-1', endpoint_url='https://bedrock-runtime.us-east-1.amazonaws.com')
-opensearch = boto3.client("opensearchserverless")
+opensearch = boto3.client("opensearchserverless", 'us-east-1')
 
 # Instantiating the OpenSearch client, with specific CLI profile
 host = os.getenv('opensearch_host')  # cluster endpoint, for example: my-test-domain.us-east-1.aoss.amazonaws.com
@@ -25,9 +25,10 @@ client = OpenSearch(
     hosts=[{'host': host, 'port': 443}],
     http_auth=auth,
     use_ssl=True,
-    verify_certs=True,
+    verify_certs=False,
+    ssl_show_warn = False,
     connection_class=RequestsHttpConnection,
-    pool_maxsize=20
+    pool_maxsize=50
 )
 
 # loading in PDF, can use PyPDFDirectoryLoader if you want to load in a directory of PDFs
