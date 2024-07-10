@@ -8,6 +8,10 @@ import * as cdk from 'aws-cdk-lib';
 import * as fs from 'fs';
 
 export class OpensearchBedrockRagCdkStack extends cdk.Stack {
+  OpenSearchEndpoint: string
+  VectorIndexName: string
+  VectorFieldName: string
+
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
@@ -202,9 +206,14 @@ export class OpensearchBedrockRagCdkStack extends cdk.Stack {
     vectorIndex.node.addDependency(collection);
     vectorIndex.node.addDependency(createIndexLambda);
 
+    this.OpenSearchEndpoint=Endpoint
+    this.VectorIndexName=vectorIndexName
+    this.VectorFieldName='vector_field'
+
     new cdk.CfnOutput(this, 'aoss_env', {
       value: `export opensearch_host=${Endpoint}\nexport vector_index_name=${vectorIndexName}\nexport vector_field_name=vector_field`
     });
+
 
 
   }
