@@ -16,7 +16,7 @@ For more details on how to deploy the infrastructure and the solution details, p
 #  Architecture Diagram: RAG App with Cognito Authenitcation using Amazon Bedrock and AOSS (Amazon OpenSearch Serverless) running on ECS Fargate
 ![Alt text](./bedrock-ecs-cognito-aoss-rag.png?raw=true "RAG App with Cognito Authenitcation using Amazon Bedrock and AOSS (Amazon OpenSearch Serverless) running on ECS Fargate")
 * [Part 4: Integrating Cognito Authentication with ECS Fargate, Bedrock, and OpenSearch Serverless](https://vivek-aws.medium.com/rag-solution-using-amazon-bedrock-part-3-automating-application-setup-with-ecs-fargate-bedrock-b3a55af9f0a4).
-
+* [Part 5: Enhancing Security Posture of the GenAI Application](https://vivek-aws.medium.com/rag-solution-using-amazon-bedrock-part-5-enhancing-security-posture-of-the-genai-application-27c8376597a5).
 
 The `cdk.json` file tells the CDK Toolkit how to execute your app.
 

@@ -69,6 +69,7 @@ export class EcsFargateCdkStack extends cdk.Stack {
       accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
       signInAliases: { email: true }, // Set email as an alias
       autoVerify: { email: true },
+      removalPolicy: cdk.RemovalPolicy.DESTROY, // Remove the user pool when the stack is destroyed
     });
 
     const userPoolDomain = new cognito.UserPoolDomain(this, 'MyUserPoolDomain', {
@@ -80,7 +81,6 @@ export class EcsFargateCdkStack extends cdk.Stack {
 
     // Construct the logout URL
     const redirectUri = encodeURIComponent(`https://${domainName}`);
-
 
     // Create a Cognito User Pool Client
     const userPoolClient = userPool.addClient('MyUserPoolClient', {
@@ -112,7 +112,6 @@ export class EcsFargateCdkStack extends cdk.Stack {
       validation: acm.CertificateValidation.fromDns(hostedZone), // Validate the certificate using DNS
     });
 
-
     // Create a new Fargate service with the image from ECR and specify the service name
     const appService = new ecs_patterns.ApplicationLoadBalancedFargateService(this, 'MyFargateService', {
       cluster,
@@ -140,13 +139,40 @@ export class EcsFargateCdkStack extends cdk.Stack {
     appService.node.addDependency(userPoolClient);
     appService.node.addDependency(userPoolDomain);
 
+    const lbSecurityGroup = new ec2.SecurityGroup(this, 'LbSecurityGroup', {
+      vpc,
+      description: 'Allow only necessary traffic to the Load Balancer',
+      allowAllOutbound: true,
+    });
 
-    const lbSecurityGroup = appService.loadBalancer.connections.securityGroups[0];
+    lbSecurityGroup.addIngressRule(
+      ec2.Peer.anyIpv4(),
+      ec2.Port.tcp(443),
+      'Allow HTTPS traffic from anywhere'
+    );
+
+    /*
     lbSecurityGroup.addEgressRule(
       ec2.Peer.anyIpv4(),
       ec2.Port.tcp(443),
       'Outbound HTTPS traffic to get to Cognito'
     );
+
+    const ecsSecurityGroup = new ec2.SecurityGroup(this, 'EcsSecurityGroup', {
+      vpc,
+      description: 'Allow only necessary traffic to ECS service',
+      allowAllOutbound: true,
+    });
+
+    ecsSecurityGroup.addIngressRule(
+      lbSecurityGroup,
+      ec2.Port.tcp(443),
+      'Allow HTTPS traffic only from the Load Balancer'
+    );
+
+    appService.service.connections.addSecurityGroup(ecsSecurityGroup);
+    */
+    appService.loadBalancer.connections.addSecurityGroup(lbSecurityGroup);
 
     appService.targetGroup.setAttribute('deregistration_delay.timeout_seconds', '10');
 
@@ -171,25 +197,49 @@ export class EcsFargateCdkStack extends cdk.Stack {
       },
     }];
 
-
-    const bedrock_iam = new iam.Policy(this, 'BedrockPermissionsPolicy', {
+    const bedrockPolicy = new iam.Policy(this, 'BedrockPolicy', {
       statements: [
         new iam.PolicyStatement({
-          effect: iam.Effect.ALLOW,
           actions: [
-            // Add Bedrock permissions here
             "bedrock:InvokeModel*",
             "bedrock:Converse*",
-            "aoss:*"
           ],
           resources: [
             "arn:aws:bedrock:us-east-1::foundation-model/amazon*",
-            "*"
-          ], // Adjust the resource as needed
+          ],
+          effect: iam.Effect.ALLOW,
         }),
       ],
-    })
+    });
 
+    const openSearchPolicy = new iam.Policy(this, 'OpenSearchPolicy', {
+      statements: [
+        new iam.PolicyStatement({
+          actions: [
+            'aoss:APIAccessAll',
+            'aoss:DescribeIndex',
+            'aoss:ReadDocument',
+            'aoss:CreateIndex',
+            'aoss:DeleteIndex',
+            'aoss:UpdateIndex',
+            'aoss:WriteDocument',
+            'aoss:CreateCollectionItems',
+            'aoss:DeleteCollectionItems',
+            'aoss:UpdateCollectionItems',
+            'aoss:DescribeCollectionItems'
+          ],
+          resources: [
+            `arn:aws:aoss:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:collection/*`,
+            `arn:aws:aoss:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:index/*`
+
+          ],
+          effect: iam.Effect.ALLOW,
+        }),
+      ],
+    });
+
+    appService.taskDefinition.taskRole?.attachInlinePolicy(bedrockPolicy);
+    appService.taskDefinition.taskRole?.attachInlinePolicy(openSearchPolicy);
     appService.taskDefinition.addToExecutionRolePolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: [
@@ -197,12 +247,11 @@ export class EcsFargateCdkStack extends cdk.Stack {
         "ssmmessages:OpenDataChannel",
         "ssmmessages:OpenControlChannel",
         "ssmmessages:CreateControlChannel",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents",
       ],
       resources: ["*"] //adjust as per your need
     }));
-
-    // Add the Bedrock permissions to the task role
-    appService.taskDefinition.taskRole?.attachInlinePolicy(bedrock_iam)
 
     // Grant ECR repository permissions for the task execution role
     appImageAsset.repository.grantPullPush(appService.taskDefinition.executionRole!);

@@ -15,25 +15,11 @@ export class OpensearchBedrockRagCdkStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    // Define the IAM role
-    const role = new iam.Role(this, 'OpenSearchServerlessAccessRole', {
-      roleName: 'OpenSearchServerlessAccessRole',
-      assumedBy: new iam.ServicePrincipal('es.amazonaws.com'),
-      managedPolicies: [
-        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonOpenSearchServiceFullAccess')
-      ]
-    });
-
-    new cdk.CfnOutput(this, 'OpenSearchServerlessAccessRoleArn', {
-      value: role.roleArn
-    });
-
     // Read SAML metadata XML from file
     const metadataFilePath = path.join(__dirname, '../metadata.xml');
     const samlMetadata = fs.readFileSync(metadataFilePath, 'utf-8');
     const CollectionName = 'rag-collection'
     const vectorIndexName = 'rag-vector-index'
-
 
     const secConfig = new opensearchserverless.CfnSecurityConfig(this, 'OpenSearchServerlessSecurityConfig', {
       name: `${CollectionName}-config`,
@@ -94,23 +80,41 @@ export class OpensearchBedrockRagCdkStack extends cdk.Stack {
         roleName: 'CreateIndex-LambdaRole',
         // Add any additional permissions required by your function
         managedPolicies: [
-          iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonOpenSearchServiceFullAccess'),
-          iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
-        ]
+          iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole')
+        ],
         // Add any additional permissions required by your function
+        inlinePolicies: {
+          lambdaOpenSearchAccessPolicy: new iam.PolicyDocument({
+            statements: [
+              new iam.PolicyStatement({
+                actions: [
+                  'aoss:APIAccessAll',
+                  'aoss:DescribeIndex',
+                  'aoss:ReadDocument',
+                  'aoss:CreateIndex',
+                  'aoss:DeleteIndex',
+                  'aoss:UpdateIndex',
+                  'aoss:WriteDocument',
+                  'aoss:CreateCollectionItems',
+                  'aoss:DeleteCollectionItems',
+                  'aoss:UpdateCollectionItems',
+                  'aoss:DescribeCollectionItems'
+                ],
+                resources: [
+                  `arn:aws:aoss:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:collection/*`,
+                  `arn:aws:aoss:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:index/${CollectionName}/*`
+                ],
+                effect: iam.Effect.ALLOW,
+              })
+            ]
+          })
+        }
       }),
       handler: 'index.handler',
       runtime: lambda.Runtime.PYTHON_3_9,
       code: lambda.Code.fromAsset('lambda'), // Path to your Lambda function code
       timeout: cdk.Duration.minutes(5),
-      initialPolicy: [
-        new iam.PolicyStatement({
-          actions: ['aoss:*', 'es:*'],
-          resources: ['*']
-        })
-      ]
     });
-
 
     // Define the data access policy
     const dataAccessPolicy = new opensearchserverless.CfnAccessPolicy(this, 'DataAccessPolicy', {
@@ -142,11 +146,9 @@ export class OpensearchBedrockRagCdkStack extends cdk.Stack {
             },
           ],
           Principal: [
-            role.roleArn,
-            `arn:aws:iam::${this.account}:root`,
-            //`arn:aws:iam::${this.account}:role/CreateIndex-LambdaRole`,
             createIndexLambda.role?.roleArn,
-            `saml/${this.account}/${CollectionName}-config/user/vivek`
+            `saml/${this.account}/${CollectionName}-config/user/vivek`,
+            `arn:aws:iam::${this.account}:root`,
           ],
         },
       ]),
@@ -158,7 +160,6 @@ export class OpensearchBedrockRagCdkStack extends cdk.Stack {
     collection.addDependency(dataAccessPolicy);
     collection.addDependency(encPolicy);
     collection.addDependency(netPolicy);
-
 
     const Endpoint = `${collection.attrId}.${cdk.Stack.of(this).region}.aoss.amazonaws.com`;
 
@@ -206,15 +207,13 @@ export class OpensearchBedrockRagCdkStack extends cdk.Stack {
     vectorIndex.node.addDependency(collection);
     vectorIndex.node.addDependency(createIndexLambda);
 
-    this.OpenSearchEndpoint=Endpoint
-    this.VectorIndexName=vectorIndexName
-    this.VectorFieldName='vector_field'
+    this.OpenSearchEndpoint = Endpoint
+    this.VectorIndexName = vectorIndexName
+    this.VectorFieldName = 'vector_field'
 
     new cdk.CfnOutput(this, 'aoss_env', {
       value: `export opensearch_host=${Endpoint}\nexport vector_index_name=${vectorIndexName}\nexport vector_field_name=vector_field`
     });
-
-
 
   }
 }
