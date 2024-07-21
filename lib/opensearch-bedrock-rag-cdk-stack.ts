@@ -112,7 +112,7 @@ export class OpensearchBedrockRagCdkStack extends cdk.Stack {
       }),
       handler: 'index.handler',
       runtime: lambda.Runtime.PYTHON_3_9,
-      code: lambda.Code.fromAsset('lambda'), // Path to your Lambda function code
+      code: lambda.Code.fromAsset('lambda/aoss'), // Path to your Lambda function code
       timeout: cdk.Duration.minutes(5),
     });
 

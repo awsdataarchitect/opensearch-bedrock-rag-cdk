@@ -12,6 +12,9 @@ import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import { Lazy } from 'aws-cdk-lib';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as sqs from 'aws-cdk-lib/aws-sqs';
+import { SqsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 
 interface ClusterProps extends cdk.StackProps {
   OpenSearchEndpoint: string,
@@ -112,6 +115,14 @@ export class EcsFargateCdkStack extends cdk.Stack {
       validation: acm.CertificateValidation.fromDns(hostedZone), // Validate the certificate using DNS
     });
 
+    // Create an SQS queue
+    const queue = new sqs.Queue(this, 'MyQueue', {
+      queueName: 'docs-queue',
+      retentionPeriod: cdk.Duration.days(1),
+      visibilityTimeout: cdk.Duration.seconds(30),
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+
     // Create a new Fargate service with the image from ECR and specify the service name
     const appService = new ecs_patterns.ApplicationLoadBalancedFargateService(this, 'MyFargateService', {
       cluster,
@@ -123,6 +134,7 @@ export class EcsFargateCdkStack extends cdk.Stack {
           'opensearch_host': props.OpenSearchEndpoint,
           'vector_index_name': props.VectorIndexName,
           'vector_field_name': props.VectorFieldName,
+          'sqs_queue_url': queue.queueUrl,
         },
       },
       certificate: certificate,
@@ -130,7 +142,8 @@ export class EcsFargateCdkStack extends cdk.Stack {
       domainZone: hostedZone,
       publicLoadBalancer: true,
       assignPublicIp: true,
-      circuitBreaker: { rollback: false },//disable rollback
+      circuitBreaker: { rollback: true },
+      healthCheckGracePeriod: cdk.Duration.minutes(10),
       enableExecuteCommand: true,
     });
 
@@ -151,27 +164,6 @@ export class EcsFargateCdkStack extends cdk.Stack {
       'Allow HTTPS traffic from anywhere'
     );
 
-    /*
-    lbSecurityGroup.addEgressRule(
-      ec2.Peer.anyIpv4(),
-      ec2.Port.tcp(443),
-      'Outbound HTTPS traffic to get to Cognito'
-    );
-
-    const ecsSecurityGroup = new ec2.SecurityGroup(this, 'EcsSecurityGroup', {
-      vpc,
-      description: 'Allow only necessary traffic to ECS service',
-      allowAllOutbound: true,
-    });
-
-    ecsSecurityGroup.addIngressRule(
-      lbSecurityGroup,
-      ec2.Port.tcp(443),
-      'Allow HTTPS traffic only from the Load Balancer'
-    );
-
-    appService.service.connections.addSecurityGroup(ecsSecurityGroup);
-    */
     appService.loadBalancer.connections.addSecurityGroup(lbSecurityGroup);
 
     appService.targetGroup.setAttribute('deregistration_delay.timeout_seconds', '10');
@@ -238,6 +230,19 @@ export class EcsFargateCdkStack extends cdk.Stack {
       ],
     });
 
+    appService.taskDefinition.taskRole?.attachInlinePolicy(new iam.Policy(this, 'QueuePolicy', {
+      statements: [
+        new iam.PolicyStatement({
+          actions: [
+            'sqs:SendMessage',
+          ],
+          resources: [queue.queueArn],
+          effect: iam.Effect.ALLOW,
+        }),
+      ],
+    })
+    );
+
     appService.taskDefinition.taskRole?.attachInlinePolicy(bedrockPolicy);
     appService.taskDefinition.taskRole?.attachInlinePolicy(openSearchPolicy);
     appService.taskDefinition.addToExecutionRolePolicy(new iam.PolicyStatement({
@@ -264,6 +269,31 @@ export class EcsFargateCdkStack extends cdk.Stack {
 
     logGroup.grantWrite(appService.taskDefinition.executionRole!);
 
+    // Create a Lambda function
+    const lambdaFunction = new lambda.Function(this, 'MyLambdaFunction', {
+      functionName: 'docs-indexer',
+      timeout: cdk.Duration.seconds(20),
+      runtime: lambda.Runtime.PYTHON_3_9,
+      handler: 'index.handler',
+      code: lambda.Code.fromAsset('lambda/indexer'),
+      environment: {
+        'opensearch_host': props.OpenSearchEndpoint,
+        'vector_index_name': props.VectorIndexName,
+        'vector_field_name': props.VectorFieldName,
+      },
+    });
+
+    lambdaFunction.role?.attachInlinePolicy(bedrockPolicy)
+    lambdaFunction.role?.attachInlinePolicy(openSearchPolicy)
+    lambdaFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['sqs:ReceiveMessage', 'sqs:DeleteMessage', 'sqs:GetQueueAttributes'],
+      resources: [queue.queueArn],
+      effect: iam.Effect.ALLOW,
+    }));
+
+    // Configure the SQS queue as an event source for the Lambda function
+    lambdaFunction.addEventSource(new SqsEventSource(queue));
+
     // Outputs
     new cdk.CfnOutput(this, 'UserPoolId', {
       description: 'The ID of the Cognito User Pool',
@@ -278,6 +308,11 @@ export class EcsFargateCdkStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'UserPoolDomainName', {
       description: 'The domain name of the Cognito User Pool Domain',
       value: userPoolDomain.domainName,
+    });
+
+    new cdk.CfnOutput(this, 'SQSQueueUrl', {
+      description: 'The URL of the SQS Queue',
+      value: queue.queueUrl,
     });
 
   }
