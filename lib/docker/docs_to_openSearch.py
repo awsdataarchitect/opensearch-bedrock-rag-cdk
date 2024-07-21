@@ -9,6 +9,10 @@ from langchain.document_loaders import PyPDFLoader, PyPDFDirectoryLoader
 # loading in environment variables
 load_dotenv()
 
+# SQS client setup
+sqs = boto3.client('sqs', region_name='us-east-1')
+queue_url = os.getenv('sqs_queue_url')
+
 # instantiating the bedrock client, with specific CLI profile
 boto3.setup_default_session(profile_name=os.getenv('profile_name'))
 bedrock = boto3.client('bedrock-runtime', 'us-east-1', endpoint_url='https://bedrock-runtime.us-east-1.amazonaws.com')
@@ -55,13 +59,18 @@ print(f'Average length among {len(documents)} documents loaded is {avg_char_coun
 print(f'After the split we have {len(doc)} documents more than the original {len(documents)}.')
 print(f'Average length among {len(doc)} documents (after split) is {avg_char_count_post} characters.')
 
+# Send each document chunk to SQS
+for i in doc:
+    exampleContent = i.page_content
+    message = json.dumps({"content": exampleContent})
+    response = sqs.send_message(
+        QueueUrl=queue_url,
+        MessageBody=message
+    )
+    print(f"Sent message to SQS: {response.get('MessageId')}")
 
+"""
 def get_embedding(body):
-    """
-    This function is used to generate the embeddings for a specific chunk of text
-    :param body: This is the example content passed in to generate an embedding
-    :return: A vector containing the embeddings of the passed in content
-    """
     modelId = 'amazon.titan-embed-text-v1'
     accept = 'application/json'
     contentType = 'application/json'
@@ -72,13 +81,6 @@ def get_embedding(body):
 
 
 def indexDoc(client, vectors, text):
-    """
-    This function indexing the documents and vectors into Amazon OpenSearch Serverless.
-    :param client: The instatiation of your OpenSearch Serverless instance.
-    :param vectors: The vector you generated with the get_embeddings function that is going to be indexed.
-    :param text: The actual text of the document you are storing along with the vector of that text.
-    :return: The confirmation that the document was indexed successfully.
-    """
     # TODO: You can add more metadata fields if you wanted to!
     indexDocument = {
         os.getenv("vector_field_name"): vectors,
@@ -109,3 +111,4 @@ for i in doc:
     # calling the indexDoc function, passing in the OpenSearch Client, the created vector, and corresponding text data
     # TODO: If you wanted to add metadata you would pass it in here
     indexDoc(client, vectors, text)
+"""
