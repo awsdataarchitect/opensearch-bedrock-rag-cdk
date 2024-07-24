@@ -6,11 +6,16 @@ import * as opensearchserverless from 'aws-cdk-lib/aws-opensearchserverless';
 import * as path from 'path';
 import * as cdk from 'aws-cdk-lib';
 import * as fs from 'fs';
+import * as sqs from 'aws-cdk-lib/aws-sqs';
+import { SqsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 
 export class OpensearchBedrockRagCdkStack extends cdk.Stack {
   OpenSearchEndpoint: string
   VectorIndexName: string
   VectorFieldName: string
+  sqs_queue_url: string
+  bedrockPolicy: iam.Policy
+  openSearchPolicy: iam.Policy
 
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
@@ -206,13 +211,96 @@ export class OpensearchBedrockRagCdkStack extends cdk.Stack {
     // Ensure vectorIndex depends on collection
     vectorIndex.node.addDependency(collection);
     vectorIndex.node.addDependency(createIndexLambda);
+    const vector_field_name= 'vector_field'
+
+      // Create an SQS queue
+      const queue = new sqs.Queue(this, 'MyQueue', {
+        queueName: 'docs-queue',
+        retentionPeriod: cdk.Duration.days(1),
+        visibilityTimeout: cdk.Duration.seconds(30),
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      });
+
+      const bedrockPolicy = new iam.Policy(this, 'BedrockPolicy', {
+        statements: [
+          new iam.PolicyStatement({
+            actions: [
+              "bedrock:InvokeModel*",
+              "bedrock:Converse*",
+            ],
+            resources: [
+              "arn:aws:bedrock:us-east-1::foundation-model/amazon*",
+            ],
+            effect: iam.Effect.ALLOW,
+          }),
+        ],
+      });
+
+      const openSearchPolicy = new iam.Policy(this, 'OpenSearchPolicy', {
+        statements: [
+          new iam.PolicyStatement({
+            actions: [
+              'aoss:APIAccessAll',
+              'aoss:DescribeIndex',
+              'aoss:ReadDocument',
+              'aoss:CreateIndex',
+              'aoss:DeleteIndex',
+              'aoss:UpdateIndex',
+              'aoss:WriteDocument',
+              'aoss:CreateCollectionItems',
+              'aoss:DeleteCollectionItems',
+              'aoss:UpdateCollectionItems',
+              'aoss:DescribeCollectionItems'
+            ],
+            resources: [
+              `arn:aws:aoss:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:collection/*`,
+              `arn:aws:aoss:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:index/*`
+  
+            ],
+            effect: iam.Effect.ALLOW,
+          }),
+        ],
+      });
+
+    // Create a Lambda function
+    const lambdaFunction = new lambda.Function(this, 'MyLambdaFunction', {
+      functionName: 'docs-indexer',
+      timeout: cdk.Duration.seconds(20),
+      runtime: lambda.Runtime.PYTHON_3_9,
+      handler: 'index.handler',
+      code: lambda.Code.fromAsset('lambda/indexer'),
+      environment: {
+        'opensearch_host': Endpoint,
+        'vector_index_name': vectorIndexName,
+        'vector_field_name': vector_field_name,
+      },
+    });
+
+    lambdaFunction.role?.attachInlinePolicy(bedrockPolicy)
+    lambdaFunction.role?.attachInlinePolicy(openSearchPolicy)
+    lambdaFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['sqs:ReceiveMessage', 'sqs:DeleteMessage', 'sqs:GetQueueAttributes'],
+      resources: [queue.queueArn],
+      effect: iam.Effect.ALLOW,
+    }));
+
+    // Configure the SQS queue as an event source for the Lambda function
+    lambdaFunction.addEventSource(new SqsEventSource(queue));
 
     this.OpenSearchEndpoint = Endpoint
     this.VectorIndexName = vectorIndexName
-    this.VectorFieldName = 'vector_field'
+    this.VectorFieldName = vector_field_name
+    this.sqs_queue_url = queue.queueArn
+    this.bedrockPolicy = bedrockPolicy
+    this.openSearchPolicy = openSearchPolicy
+    
 
     new cdk.CfnOutput(this, 'aoss_env', {
       value: `export opensearch_host=${Endpoint}\nexport vector_index_name=${vectorIndexName}\nexport vector_field_name=vector_field`
+    });
+
+    new cdk.CfnOutput(this, 'sqs_queue_url', {
+      value: queue.queueArn
     });
 
   }
