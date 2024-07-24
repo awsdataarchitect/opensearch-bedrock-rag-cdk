@@ -22,6 +22,8 @@ For more details on how to deploy the infrastructure and the solution details, p
 ![Alt text](./bedrock-ecs-sqs-lambda-cognito-aoss-rag.png?raw=true "Event-Driven Document Indexing RAG App with Cognito Authenitcation using Amazon Bedrock and AOSS (Amazon OpenSearch Serverless) running on ECS Fargate")
 * [Part 6: Enhancing Document Indexing with Event-Driven Architecture for a GenAI Application](https://medium.com/@vivek-aws/rag-solution-using-amazon-bedrock-part-6-enhancing-document-indexing-with-event-driven-770eaf167a0a).
 
+* [Part 7: Deploying on Amazon EKS](https://vivek-aws.medium.com/rag-solution-using-amazon-bedrock-part-7-deploying-on-amazon-eks-bae8a56c0ba1).
+
 The `cdk.json` file tells the CDK Toolkit how to execute your app.
 
 ## Useful commands
