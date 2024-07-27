@@ -4,6 +4,7 @@ import * as cdk from 'aws-cdk-lib';
 import { OpensearchBedrockRagCdkStack } from '../lib/opensearch-bedrock-rag-cdk-stack';
 import { EcsFargateCdkStack } from '../lib/ecs-fargate-cdk-stack';
 import { EksClusterStack } from '../lib/eks-cluster-cdk-stack';
+import { CognitoStack } from '../lib/cognito-cdk-stack'
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -40,20 +41,28 @@ const props = {
   bedrockPolicy: openSearchStack.bedrockPolicy,
   openSearchPolicy: openSearchStack.openSearchPolicy,
   sqs_queue_url: openSearchStack.sqs_queue_url,
+  sqs_queue_arn: openSearchStack.sqs_queue_arn,
   domainName: domainName,
   hostedZoneId: hostedZoneId,
   env: env,
 }
 
+
 if (targetPlatform === 'ecs') {
   new EcsFargateCdkStack(app, 'EcsFargateCdkStack', {
-    ...props
+    ...props,
   });
 
 } else if (targetPlatform === 'eks') {
-  new EksClusterStack(app, 'EksClusterStack', {
+  const cognitoStack = new CognitoStack(app, 'CognitoStack', {
     ...props
   });
-
+  new EksClusterStack(app, 'EksClusterCdkStack', {
+    ...props,
+    userPoolClientId: cognitoStack.cognitoUserPoolClient.userPoolClientId,
+    userPoolArn: cognitoStack.cognitoUserPool.userPoolArn,
+    acmCertificate: cognitoStack.acmCertificate,
+    userPoolDomain: cognitoStack.cognitoUserPoolDomain,
+  });
 
 }
