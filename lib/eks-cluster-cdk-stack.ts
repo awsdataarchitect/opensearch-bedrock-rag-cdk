@@ -6,6 +6,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as blueprints from '@aws-quickstart/eks-blueprints';
 import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Lazy } from 'aws-cdk-lib';
+import { LookupHostedZoneProvider, GlobalResources } from '@aws-quickstart/eks-blueprints';
 
 interface ClusterProps extends cdk.StackProps {
   OpenSearchEndpoint: string;
@@ -14,8 +15,13 @@ interface ClusterProps extends cdk.StackProps {
   domainName: string,
   hostedZoneId: string,
   sqs_queue_url: string,
+  sqs_queue_arn: string,
   bedrockPolicy: iam.Policy,
-  openSearchPolicy: iam.Policy
+  openSearchPolicy: iam.Policy,
+  userPoolArn: string,
+  userPoolClientId: string,
+  userPoolDomain: string
+  acmCertificate: string,
 }
 
 export class EksClusterStack extends cdk.Stack {
@@ -54,11 +60,15 @@ export class EksClusterStack extends cdk.Stack {
       platform: Platform.LINUX_AMD64, // Specify the x86 architecture
     });
 
+
     const addOns: Array<blueprints.ClusterAddOn> = [
       new blueprints.addons.AwsLoadBalancerControllerAddOn(),
       new blueprints.addons.VpcCniAddOn(),
+      new blueprints.ExternalDnsAddOn({
+        hostedZoneResources: [GlobalResources.HostedZone]
+      }),
       new StreamlitAppManifests(appImageAsset.imageUri, props.OpenSearchEndpoint, props.VectorIndexName, props.VectorFieldName,
-        props.sqs_queue_url
+        props.sqs_queue_url, props.userPoolArn, props.userPoolClientId, props.domainName, props.userPoolDomain, props.acmCertificate
       )
     ];
 
@@ -94,7 +104,7 @@ export class EksClusterStack extends cdk.Stack {
                     new iam.PolicyStatement({
                       actions: ['sqs:SendMessage'],
                       resources: [
-                        Lazy.string({ produce: () => `${props.sqs_queue_url}` }),
+                        Lazy.string({ produce: () => `${props.sqs_queue_arn}` }),
                       ],
                       effect: iam.Effect.ALLOW,
                     }),
@@ -132,6 +142,7 @@ export class EksClusterStack extends cdk.Stack {
       .addOns(...addOns)
       .clusterProvider(clusterProvider)
       .teams(platformTeam)
+      .resourceProvider(GlobalResources.HostedZone, new LookupHostedZoneProvider(props.domainName))
       .resourceProvider(blueprints.GlobalResources.Vpc,
         new blueprints.DirectVpcProvider(vpc))
       .build(this, 'bedrock-eks-cluster')
@@ -144,15 +155,25 @@ class StreamlitAppManifests implements blueprints.ClusterAddOn {
   private readonly vectorIndexName: string;
   private readonly vectorFieldName: string;
   private readonly sqs_queue_url: string;
+  private readonly userPoolArn: string;
+  private readonly userPoolClientId: string;
+  private readonly userPoolDomain: string;
+  private readonly acmCertificate: string;
+  private readonly domainName: string;
 
   constructor(imageUri: string, opensearchHost: string, vectorIndexName: string, vectorFieldName: string,
-    sqs_queue_url: string
+    sqs_queue_url: string, userPoolArn: string, userPoolClientId: string, domainName: string, userPoolDomain: string, acmCertificate: string
   ) {
     this.imageUri = imageUri;
     this.opensearchHost = opensearchHost;
     this.vectorIndexName = vectorIndexName;
     this.vectorFieldName = vectorFieldName;
     this.sqs_queue_url = sqs_queue_url
+    this.userPoolArn = userPoolArn;
+    this.userPoolClientId = userPoolClientId;
+    this.userPoolDomain = userPoolDomain;
+    this.acmCertificate = acmCertificate;
+    this.domainName = domainName;
   }
 
   deploy(clusterInfo: blueprints.ClusterInfo): void {
@@ -208,8 +229,8 @@ class StreamlitAppManifests implements blueprints.ClusterAddOn {
         app: rag-app
       ports:
         - protocol: TCP
-          port: 80
-          targetPort: 8501
+          port: 443
+          targetPort: 8501  
       type: NodePort
     `;
 
@@ -221,35 +242,50 @@ class StreamlitAppManifests implements blueprints.ClusterAddOn {
       overwrite: true
     });
 
-    // Inline YAML manifest for Ingress
-    const ingressManifest = `---
-    apiVersion: networking.k8s.io/v1
-    kind: Ingress
-    metadata:
-      name: rag-ingress
-      namespace: default
-      annotations:
-        alb.ingress.kubernetes.io/scheme: internet-facing
-    spec:
-      ingressClassName: alb
-      rules:
-        - http:
-            paths:
-              - path: /
-                pathType: Prefix
-                backend:
-                  service:
-                    name: rag-service
-                    port:
-                      number: 80
-    `;
-
-    manifest = ingressManifest.split("---").map(e => blueprints.utils.loadYaml(e));
-
-    new eks.KubernetesManifest(cluster.stack, "ingress-manifest", {
-      cluster,
-      manifest,
-      overwrite: true
+    const ingress = cluster.addManifest('ingress', {
+      apiVersion: 'networking.k8s.io/v1',
+      kind: 'Ingress',
+      metadata: {
+        name: 'rag-ingress',
+        annotations: {
+          'alb.ingress.kubernetes.io/scheme': 'internet-facing',
+          'alb.ingress.kubernetes.io/target-type': 'ip',
+          'alb.ingress.kubernetes.io/auth-type': 'cognito',
+          'alb.ingress.kubernetes.io/certificate-arn': this.acmCertificate,
+          'alb.ingress.kubernetes.io/auth-idp-cognito': JSON.stringify({
+            userPoolArn: this.userPoolArn,
+            userPoolClientId: this.userPoolClientId,
+            userPoolDomain: this.userPoolDomain,
+          }),
+          //'alb.ingress.kubernetes.io/auth-session-timeout': '3600',
+          //'alb.ingress.kubernetes.io/listen-ports': '[{"HTTP": 80}, {"HTTPS":443}]',  
+          //'alb.ingress.kubernetes.io/auth-session-cookie': 'AWSELBAuthSessionCookie',
+          //'alb.ingress.kubernetes.io/auth-on-unauthenticated-request': 'authenticate',
+        },
+      },
+      spec: {
+        ingressClassName: 'alb',
+        rules: [
+          {
+            host: `${this.domainName}`,
+            http: {
+              paths: [
+                {
+                  path: '/',
+                  pathType: 'Prefix',
+                  backend: {
+                    service: {
+                      name: 'rag-service',
+                      port: { number: 443 },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
     });
+
   }
 }
