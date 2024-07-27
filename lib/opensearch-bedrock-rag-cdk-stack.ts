@@ -14,6 +14,7 @@ export class OpensearchBedrockRagCdkStack extends cdk.Stack {
   VectorIndexName: string
   VectorFieldName: string
   sqs_queue_url: string
+  sqs_queue_arn: string
   bedrockPolicy: iam.Policy
   openSearchPolicy: iam.Policy
 
@@ -290,7 +291,8 @@ export class OpensearchBedrockRagCdkStack extends cdk.Stack {
     this.OpenSearchEndpoint = Endpoint
     this.VectorIndexName = vectorIndexName
     this.VectorFieldName = vector_field_name
-    this.sqs_queue_url = queue.queueArn
+    this.sqs_queue_url = queue.queueUrl
+    this.sqs_queue_arn = queue.queueArn
     this.bedrockPolicy = bedrockPolicy
     this.openSearchPolicy = openSearchPolicy
     
@@ -300,7 +302,7 @@ export class OpensearchBedrockRagCdkStack extends cdk.Stack {
     });
 
     new cdk.CfnOutput(this, 'sqs_queue_url', {
-      value: queue.queueArn
+      value: queue.queueUrl
     });
 
   }
