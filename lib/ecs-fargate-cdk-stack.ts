@@ -16,8 +16,9 @@ interface ClusterProps extends cdk.StackProps {
   VectorIndexName: string,
   VectorFieldName: string,
   domainName: string,
-  hostedZoneId: string
-  sqs_queue_url: string
+  hostedZoneId: string,
+  sqs_queue_url: string,
+  sqs_queue_arn: string,
   bedrockPolicy: iam.Policy,
   openSearchPolicy: iam.Policy
 }
@@ -177,7 +178,7 @@ export class EcsFargateCdkStack extends cdk.Stack {
           actions: [
             'sqs:SendMessage',
           ],
-          resources: [props.sqs_queue_url],
+          resources: [props.sqs_queue_arn],
           effect: iam.Effect.ALLOW,
         }),
       ],
