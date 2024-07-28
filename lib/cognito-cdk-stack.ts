@@ -6,20 +6,18 @@ import { Lazy } from 'aws-cdk-lib';
 
 interface ClusterProps extends cdk.StackProps {
     domainName: string,
-    hostedZoneId: string
   }
   
 export class CognitoStack extends cdk.Stack {
   public readonly cognitoUserPool: cognito.UserPool;
   public readonly cognitoUserPoolClient: cognito.UserPoolClient;
-  public readonly cognitoUserPoolDomain: string;
-  public readonly acmCertificate: string;
+  public readonly cognitoUserPoolDomain: cognito.UserPoolDomain;
+  public readonly acmCertificate: acm.Certificate;
 
   constructor(scope: Construct, id: string, props: ClusterProps) {
     super(scope, id, props);
 
     const domainName = props.domainName;
-    const hostedZoneId = props.hostedZoneId;
 
     // Create a Cognito User Pool
     const userPool = new cognito.UserPool(this, 'MyUserPool', {
@@ -60,9 +58,8 @@ export class CognitoStack extends cdk.Stack {
       supportedIdentityProviders: [cognito.UserPoolClientIdentityProvider.COGNITO],
     });
 
-    const hostedZone = cdk.aws_route53.HostedZone.fromHostedZoneAttributes(this, 'hosted-zone', {
-      hostedZoneId: hostedZoneId,
-      zoneName: domainName,
+    const hostedZone = cdk.aws_route53.HostedZone.fromLookup(this, 'ImportedHostedZone', {
+      domainName: domainName,
     });
 
     // Create an SSL certificate
@@ -73,9 +70,8 @@ export class CognitoStack extends cdk.Stack {
 
     this.cognitoUserPool = userPool;
     this.cognitoUserPoolClient = userPoolClient;  
-    this.cognitoUserPoolDomain = userPoolDomain.domainName;
-    this.acmCertificate = certificate.certificateArn
+    this.cognitoUserPoolDomain = userPoolDomain;
+    this.acmCertificate = certificate
 
   }
 }
-

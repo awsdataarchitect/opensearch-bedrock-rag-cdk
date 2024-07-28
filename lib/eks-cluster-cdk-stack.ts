@@ -13,15 +13,14 @@ interface ClusterProps extends cdk.StackProps {
   VectorIndexName: string;
   VectorFieldName: string;
   domainName: string,
-  hostedZoneId: string,
   sqs_queue_url: string,
   sqs_queue_arn: string,
   bedrockPolicy: iam.Policy,
   openSearchPolicy: iam.Policy,
-  userPoolArn: string,
-  userPoolClientId: string,
-  userPoolDomain: string
-  acmCertificate: string,
+  userPool: cdk.aws_cognito.IUserPool,
+  userPoolClient: cdk.aws_cognito.IUserPoolClient,
+  userPoolDomain: cdk.aws_cognito.IUserPoolDomain
+  acmCertificate: cdk.aws_certificatemanager.ICertificate
 }
 
 export class EksClusterStack extends cdk.Stack {
@@ -68,7 +67,7 @@ export class EksClusterStack extends cdk.Stack {
         hostedZoneResources: [GlobalResources.HostedZone]
       }),
       new StreamlitAppManifests(appImageAsset.imageUri, props.OpenSearchEndpoint, props.VectorIndexName, props.VectorFieldName,
-        props.sqs_queue_url, props.userPoolArn, props.userPoolClientId, props.domainName, props.userPoolDomain, props.acmCertificate
+        props.sqs_queue_url, props.userPool.userPoolArn, props.userPoolClient.userPoolClientId, props.domainName, props.userPoolDomain.domainName, props.acmCertificate.certificateArn
       )
     ];
 

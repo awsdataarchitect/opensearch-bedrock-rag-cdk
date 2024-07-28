@@ -27,7 +27,6 @@ const env = {
 const app = new cdk.App();
 
 const domainName = config['domainName'];
-const hostedZoneId = config['hostedZoneId'];
 const targetPlatform = config['targetPlatform'];
 
 const openSearchStack = new OpensearchBedrockRagCdkStack(app, 'OpensearchBedrockRagCdkStack', {
@@ -43,26 +42,35 @@ const props = {
   sqs_queue_url: openSearchStack.sqs_queue_url,
   sqs_queue_arn: openSearchStack.sqs_queue_arn,
   domainName: domainName,
-  hostedZoneId: hostedZoneId,
   env: env,
 }
 
+const cognitoStack = new CognitoStack(app, 'CognitoStack', {
+  ...props
+});
+
+cognitoStack.node.addDependency(openSearchStack);
 
 if (targetPlatform === 'ecs') {
-  new EcsFargateCdkStack(app, 'EcsFargateCdkStack', {
+  const ecsFargateCdkStack = new EcsFargateCdkStack(app, 'EcsFargateCdkStack', {
     ...props,
+    userPool: cognitoStack.cognitoUserPool,
+    userPoolClient: cognitoStack.cognitoUserPoolClient,
+    //userPoolDomain: cdk.aws_cognito.UserPoolDomain.fromDomainName(app, 'MyUserPoolDomain', cognitoStack.cognitoUserPoolDomain.domainName),
+    //userPoolDomain: cognitoStack.node.tryGetContext('MyUserPoolDomain') as cdk.aws_cognito.IUserPoolDomain,
+    //userPoolDomain: cognitoStack.node.tryFindChild('MyUserPoolDomain') as cdk.aws_cognito.IUserPoolDomain,
+    userPoolDomain: cognitoStack.cognitoUserPoolDomain,
+    acmCertificate: cognitoStack.acmCertificate,
   });
-
+  ecsFargateCdkStack.addDependency(openSearchStack);
+  ecsFargateCdkStack.node.addDependency(cognitoStack);
 } else if (targetPlatform === 'eks') {
-  const cognitoStack = new CognitoStack(app, 'CognitoStack', {
-    ...props
-  });
   new EksClusterStack(app, 'EksClusterCdkStack', {
     ...props,
-    userPoolClientId: cognitoStack.cognitoUserPoolClient.userPoolClientId,
-    userPoolArn: cognitoStack.cognitoUserPool.userPoolArn,
-    acmCertificate: cognitoStack.acmCertificate,
+    userPool: cognitoStack.cognitoUserPool,
+    userPoolClient: cognitoStack.cognitoUserPoolClient,
     userPoolDomain: cognitoStack.cognitoUserPoolDomain,
+    acmCertificate: cognitoStack.acmCertificate,
   });
 
 }
