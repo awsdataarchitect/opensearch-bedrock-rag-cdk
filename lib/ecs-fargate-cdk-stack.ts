@@ -19,8 +19,9 @@ interface ClusterProps extends cdk.StackProps {
   openSearchPolicy: iam.Policy,
   userPool: cdk.aws_cognito.IUserPool,
   userPoolClient: cdk.aws_cognito.IUserPoolClient,
-  userPoolDomain: cdk.aws_cognito.IUserPoolDomain
-  acmCertificate: cdk.aws_certificatemanager.ICertificate
+  userPoolDomain: cdk.aws_cognito.IUserPoolDomain,
+  acmCertificate: cdk.aws_certificatemanager.ICertificate,
+  DOCKER_CONTAINER_PLATFORM_ARCH: string
 }
 
 export class EcsFargateCdkStack extends cdk.Stack {
@@ -45,11 +46,13 @@ export class EcsFargateCdkStack extends cdk.Stack {
       clusterName: 'bedrock-ecs-cluster',
     });
 
+    const dockerPlatform = props.DOCKER_CONTAINER_PLATFORM_ARCH
+    console.log(`Docker Platform: ${dockerPlatform}`);
+
     // Build and push Docker image to ECR
     const appImageAsset = new DockerImageAsset(this, 'MyStreamlitAppImage', {
       directory: './lib/docker',
-      platform: Platform.LINUX_AMD64, // Specify the x86 architecture
-
+      platform: dockerPlatform == "arm" ? Platform.LINUX_ARM64 : Platform.LINUX_AMD64
     });
 
     const hostedZone = cdk.aws_route53.HostedZone.fromLookup(this, 'ImportedHostedZone', {
@@ -69,6 +72,10 @@ export class EcsFargateCdkStack extends cdk.Stack {
           'vector_field_name': props.VectorFieldName,
           'sqs_queue_url': props.sqs_queue_url,
         },
+      },
+      runtimePlatform: {
+        operatingSystemFamily: ecs.OperatingSystemFamily.LINUX,
+        cpuArchitecture: dockerPlatform == "arm" ? ecs.CpuArchitecture.ARM64 : ecs.CpuArchitecture.X86_64
       },
       certificate: props.acmCertificate,
       domainName: props.domainName,
@@ -96,16 +103,19 @@ export class EcsFargateCdkStack extends cdk.Stack {
 
     appService.targetGroup.setAttribute('deregistration_delay.timeout_seconds', '10');
 
-    appService.listener.addAction('authenticate-rule', {
-      priority: 1000,
-      action: new cdk.aws_elasticloadbalancingv2_actions.AuthenticateCognitoAction({
-        next: elbv2.ListenerAction.forward([appService.targetGroup]),
-        userPool: props.userPool,
-        userPoolClient: props.userPoolClient,
-        userPoolDomain: props.userPoolDomain,
-      }),
-      conditions: [elbv2.ListenerCondition.hostHeaders([props.domainName])],
-    });
+    // Check if the properties are defined before creating the action
+    if (props.userPool && props.userPoolClient && props.userPoolDomain) {
+      appService.listener.addAction('authenticate-rule', {
+        priority: 1000,
+        action: new cdk.aws_elasticloadbalancingv2_actions.AuthenticateCognitoAction({
+          next: elbv2.ListenerAction.forward([appService.targetGroup]),
+          userPool: props.userPool,
+          userPoolClient: props.userPoolClient,
+          userPoolDomain: props.userPoolDomain,
+        }),
+        conditions: [elbv2.ListenerCondition.hostHeaders([props.domainName])],
+      });
+    }
 
     const cfnListener = appService.listener.node.defaultChild as elbv2.CfnListener;
     cfnListener.defaultActions = [{
