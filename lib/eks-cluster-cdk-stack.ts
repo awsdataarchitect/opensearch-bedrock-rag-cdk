@@ -19,18 +19,21 @@ interface ClusterProps extends cdk.StackProps {
   openSearchPolicy: iam.Policy,
   userPool: cdk.aws_cognito.IUserPool,
   userPoolClient: cdk.aws_cognito.IUserPoolClient,
-  userPoolDomain: cdk.aws_cognito.IUserPoolDomain
-  acmCertificate: cdk.aws_certificatemanager.ICertificate
+  userPoolDomain: cdk.aws_cognito.IUserPoolDomain,
+  acmCertificate: cdk.aws_certificatemanager.ICertificate,
+  DOCKER_CONTAINER_PLATFORM_ARCH: string,
+  MASTERS_ROLE_ARN: string,
+  USER_ROLE_ARN: string,
 }
 
 export class EksClusterStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: ClusterProps) {
     super(scope, id, props);
 
-    const mastersRoleArn = process.env.MASTERS_ROLE_ARN || 'arn:aws:iam::1234567890:role/mastersRoleArn';
-    const userRoleArn = process.env.USER_ROLE_ARN //|| 'arn:aws:iam::1234567890:role/userRoleArn';
-    //const workerSpotInstanceType = 't4g.medium';
-    const workerSpotInstanceType = 't3.medium';
+    const mastersRoleArn = props.MASTERS_ROLE_ARN;
+    const userRoleArn = props.USER_ROLE_ARN;
+    const dockerPlatform = props.DOCKER_CONTAINER_PLATFORM_ARCH;
+    console.log(`Docker Platform: ${dockerPlatform}`);
 
     // Create a VPC with public subnets only and 2 max availability zones
     const vpc = new ec2.Vpc(this, 'MyVpc', {
@@ -56,9 +59,8 @@ export class EksClusterStack extends cdk.Stack {
     // Build and push Docker image to ECR
     const appImageAsset = new DockerImageAsset(this, 'MyStreamlitAppImage', {
       directory: './lib/docker',
-      platform: Platform.LINUX_AMD64, // Specify the x86 architecture
+      platform: dockerPlatform == "arm" ? Platform.LINUX_ARM64 : Platform.LINUX_AMD64
     });
-
 
     const addOns: Array<blueprints.ClusterAddOn> = [
       new blueprints.addons.AwsLoadBalancerControllerAddOn(),
@@ -81,9 +83,8 @@ export class EksClusterStack extends cdk.Stack {
       }),
       managedNodeGroups: [{
         id: 'mng1',
-        instanceTypes: [new ec2.InstanceType(workerSpotInstanceType)],
-        //amiType: eks.NodegroupAmiType.AL2_ARM_64,
-        amiType: eks.NodegroupAmiType.AL2_X86_64,
+        instanceTypes: [new ec2.InstanceType(dockerPlatform == "arm" ? 't4g.medium': 't3.medium')],
+        amiType:  dockerPlatform == "arm" ? eks.NodegroupAmiType.AL2_ARM_64 : eks.NodegroupAmiType.AL2_X86_64,
         nodeGroupCapacityType: eks.CapacityType.SPOT,
         nodeRole:
           blueprints.getResource(
@@ -285,6 +286,5 @@ class StreamlitAppManifests implements blueprints.ClusterAddOn {
         ],
       },
     });
-
   }
 }
