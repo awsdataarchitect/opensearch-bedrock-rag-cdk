@@ -28,6 +28,10 @@ const app = new cdk.App();
 
 const domainName = config['domainName'];
 const targetPlatform = config['targetPlatform'];
+const cognito = config['cognito'] === 'true' ? true : false;
+const DOCKER_CONTAINER_PLATFORM_ARCH = config['DOCKER_CONTAINER_PLATFORM_ARCH'];
+const MASTERS_ROLE_ARN = config['MASTERS_ROLE_ARN'];
+const USER_ROLE_ARN = config['USER_ROLE_ARN'];
 
 const openSearchStack = new OpensearchBedrockRagCdkStack(app, 'OpensearchBedrockRagCdkStack', {
   env: env,
@@ -42,35 +46,48 @@ const props = {
   sqs_queue_url: openSearchStack.sqs_queue_url,
   sqs_queue_arn: openSearchStack.sqs_queue_arn,
   domainName: domainName,
+  DOCKER_CONTAINER_PLATFORM_ARCH: DOCKER_CONTAINER_PLATFORM_ARCH,
+  MASTERS_ROLE_ARN: MASTERS_ROLE_ARN,
+  USER_ROLE_ARN: USER_ROLE_ARN,
   env: env,
 }
 
-const cognitoStack = new CognitoStack(app, 'CognitoStack', {
-  ...props
-});
+let cognitoStack: CognitoStack | any;
 
-cognitoStack.node.addDependency(openSearchStack);
+if (cognito) {
+   cognitoStack = new CognitoStack(app, 'CognitoStack', {
+    ...props
+  });
+  cognitoStack.node.addDependency(openSearchStack);
+}
+
+// Define `cognitoStackProps` based on whether `cognitoStack` is defined
+const cognitoStackProps = cognitoStack ? {
+  userPool: cognitoStack.cognitoUserPool,
+  userPoolClient: cognitoStack.cognitoUserPoolClient,
+  userPoolDomain: cognitoStack.cognitoUserPoolDomain,
+  //userPoolDomain: cdk.aws_cognito.UserPoolDomain.fromDomainName(app, 'MyUserPoolDomain', cognitoStack.cognitoUserPoolDomain.domainName),
+  //userPoolDomain: cognitoStack.node.tryGetContext('MyUserPoolDomain') as cdk.aws_cognito.IUserPoolDomain,
+  //userPoolDomain: cognitoStack.node.tryFindChild('MyUserPoolDomain') as cdk.aws_cognito.IUserPoolDomain,
+  acmCertificate: cognitoStack.acmCertificate,
+} : {};
 
 if (targetPlatform === 'ecs') {
   const ecsFargateCdkStack = new EcsFargateCdkStack(app, 'EcsFargateCdkStack', {
     ...props,
-    userPool: cognitoStack.cognitoUserPool,
-    userPoolClient: cognitoStack.cognitoUserPoolClient,
-    //userPoolDomain: cdk.aws_cognito.UserPoolDomain.fromDomainName(app, 'MyUserPoolDomain', cognitoStack.cognitoUserPoolDomain.domainName),
-    //userPoolDomain: cognitoStack.node.tryGetContext('MyUserPoolDomain') as cdk.aws_cognito.IUserPoolDomain,
-    //userPoolDomain: cognitoStack.node.tryFindChild('MyUserPoolDomain') as cdk.aws_cognito.IUserPoolDomain,
-    userPoolDomain: cognitoStack.cognitoUserPoolDomain,
-    acmCertificate: cognitoStack.acmCertificate,
+    ...(cognitoStackProps as any),
   });
   ecsFargateCdkStack.addDependency(openSearchStack);
-  ecsFargateCdkStack.node.addDependency(cognitoStack);
+  if (cognitoStack) {
+    ecsFargateCdkStack.node.addDependency(cognitoStack);
+  }
 } else if (targetPlatform === 'eks') {
-  new EksClusterStack(app, 'EksClusterCdkStack', {
+  const eksClusterStack = new EksClusterStack(app, 'EksClusterCdkStack', {
     ...props,
-    userPool: cognitoStack.cognitoUserPool,
-    userPoolClient: cognitoStack.cognitoUserPoolClient,
-    userPoolDomain: cognitoStack.cognitoUserPoolDomain,
-    acmCertificate: cognitoStack.acmCertificate,
+    ...(cognitoStackProps as any),
   });
-
+  eksClusterStack.addDependency(openSearchStack);
+  if (cognitoStack) {
+    eksClusterStack.node.addDependency(cognitoStack);
+  }
 }
