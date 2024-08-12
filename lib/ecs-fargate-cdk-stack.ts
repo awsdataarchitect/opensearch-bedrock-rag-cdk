@@ -83,7 +83,7 @@ export class EcsFargateCdkStack extends cdk.Stack {
       publicLoadBalancer: true,
       assignPublicIp: true,
       circuitBreaker: { rollback: true },
-      healthCheckGracePeriod: cdk.Duration.minutes(5),
+      healthCheckGracePeriod: cdk.Duration.seconds(50),
       enableExecuteCommand: true,
     });
 
