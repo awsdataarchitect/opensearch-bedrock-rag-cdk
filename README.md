@@ -30,6 +30,7 @@ For more details on how to deploy the infrastructure and the solution details, p
 
 * [Part 9: Optimizing ECS and EKS Infrastructure with AWS Graviton](https://vivek-aws.medium.com/rag-solution-on-amazon-bedrock-part-9-optimizing-ecs-and-eks-infra-with-aws-graviton-897353d96390).
 
+* [Part 10: Develop Cost Sensitive Self-Terminating Resources Using CDK Aspects and Advanced CDK Tips](https://medium.com/@vivek-aws/rag-solution-on-amazon-bedrock-part-10-develop-cost-sensitive-self-terminating-resources-using-97aa0c0ebc20).
 
 The `cdk.json` file tells the CDK Toolkit how to execute your app.
 
